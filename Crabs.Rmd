@@ -1,0 +1,135 @@
+---
+title: "Crab Sattelites"
+author: "Sean Steele"
+date: "12/5/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(lmtest)
+library(margins)
+```
+
+#Read data and adjust varaibles 
+```{r}
+crabs <- read.table("http://www.stat.ufl.edu/~aa/cat/data/Crabs.dat", header=TRUE)
+#Create clearer color variables
+crabs$light<-as.factor(crabs$color==1)
+crabs$medium<-as.factor(crabs$color==2)
+crabs$mDark<-as.factor(crabs$color==3)
+crabs$dark<-as.factor(crabs$color==4)
+```
+
+#Explore data with plots
+```{r}
+#Color and width seem to show a possible trend in number of mate satellites heavy concentration of zero satellites hints that a binary response framework (no sat/ vs sat ~ width and/or weight) as best indicator for a general trend
+plot(x= crabs$width, y = crabs$sat) 
+plot(x= crabs$weight, y = crabs$sat)
+plot(x= crabs$color, y = crabs$sat)
+
+#explore data as binary response plots
+plot(x= crabs$width, y= crabs$y)
+plot(x= crabs$weight, y= crabs$y)
+
+```
+
+#explore basic linear probability model
+```{r}
+summary(crabs)
+#colorless LPM model
+LPM1 <- lm(y~ width + weight, data = crabs)
+summary(LPM1)
+coeftest(LPM1, type = "HC1") #Hetroskedasticity robust standard errors required
+#Weight variable is insignificant at even the 10% alpha level, but the model F statistic indicates the overall model is signficant
+
+#Drop Weight from LPM model
+LPM2 <- lm(y~ width, data = crabs)
+summary(LPM2)
+coeftest(LPM2, type = "HC1")
+#Width now highly significant with a one millimeter increase in width corresponding to a ~9% increase in having a satellite
+
+#Add nominal scale color variables with dark color as the base group
+LPM3 <- lm(y~width + light + medium + mDark, data = crabs)
+summary(LPM3)
+coeftest(LPM3, type = "HC1")
+#linear probability model indicates that medium and medium dark colors are significantly (at 5% alpha level) more likely to have a satellite than dark colored crabs by 29.3% and 23.5% respectively. 
+
+```
+
+#Fit the logit and probit model for a more appropriate binary response model
+```{r}
+#estimate logit with color included
+logit1 <- glm(y~width + light + medium + mDark, family = binomial(link = "logit"), data = crabs)
+summary(logit1) #AIC = 197.46
+#obtain APEs
+summary(margins(logit2))
+#each one millimeter increase in width corresponds to an average marginal effect of ~8% increase in having satellites while light, medium, and dark colored crabs have a 20.5%, 18%, and 26% increase in probability of having satellites compared to dark crabs 
+
+#see if probit model has better fit to data
+probit1 <- glm(y~width + light + medium + mDark, family = binomial(link = "probit"), data = crabs)
+summary(probit1) #210.38 -- logit model better fit to data
+
+#plot logit model
+logit_plot <- ggplot(crabs, aes(x=width, y=y)) +
+  geom_point(alpha = 0.3) +
+  stat_smooth(method = "glm", se= TRUE, method.args = list(family=binomial))
+logit_plot
+```
+
+#Determine affect of colors on satellite presence by likihood ratio test
+```{r}
+#unrestricted model is logit1: Pr[y=1| width, light,medium,medium dark]
+#restricted model: Pr[y=1|width]
+
+#unrestricted residual deviance
+URdeviance<-logit1$deviance
+
+#restricted model
+logit2<-glm(y~width, family = binomial(link = "logit"), data=crabs)
+#restricted residual deviance
+Rdeviance<-logit2$deviance
+
+#LR test stat
+LR<-(Rdeviance-URdeviance)
+
+#test with chi square under 3 degrees of freedom
+pchisq(LR, df=3, lower.tail=FALSE)
+#At 5% significance level must reject that color as a factor variable is significant
+
+```
+
+#Does treating color as a numeric ordinal variable fit the data better and retain significance?
+```{r}
+logit3 <- glm(y ~ width + color, family = binomial(link = "logit"), data = crabs)
+summary(margins(logit3))
+#The average marginal effect of width remains nearly the same at about ~8% increase of satellite per one millimeter increase in width, and a one unit increase in darkness (ie: light to medium light or medium to dark) results in a ~9% decrease in probability of having satellites and is significant at the 5% level
+
+#check significance 
+#unrestricted model is logit1: Pr[y=1| width, color]
+#restricted model: Pr[y=1|width]
+
+#unrestricted residual deviance
+URdeviance2<-logit3$deviance
+
+#restricted still logit 2 from above
+#LR test stat
+LR2<-(Rdeviance-URdeviance2)
+
+#test with chi square under 1 degree of freedom
+pchisq(LR2, df=1, lower.tail=FALSE)
+#model is significant at 5% level (p= 0.021)
+
+#check model fitness between ordinal and factor variable
+BIC(logit1) #213.2
+BIC(logit3) #204.6
+
+#Ordinal variable with number of regressor penalty (BIC) shows better fit to data in addition to higher significance 
+```
+
+
+
