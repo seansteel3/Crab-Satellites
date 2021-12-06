@@ -13,6 +13,8 @@ knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(lmtest)
 library(margins)
+library(sandwich)
+library(mfx)
 ```
 
 #Read data and adjust varaibles 
@@ -36,6 +38,8 @@ plot(x= crabs$color, y = crabs$sat)
 plot(x= crabs$width, y= crabs$y)
 plot(x= crabs$weight, y= crabs$y)
 
+#Explore histogram of number of satellites 
+hist(crabs$sat, breaks= 30) #histogram hints that satellites could be count variable with a Poission distribution -- explore after logit model
 ```
 
 #explore basic linear probability model
@@ -51,7 +55,7 @@ coeftest(LPM1, type = "HC1") #Hetroskedasticity robust standard errors required
 LPM2 <- lm(y~ width, data = crabs)
 summary(LPM2)
 coeftest(LPM2, type = "HC1")
-#Width now highly significant with a one millimeter increase in width corresponding to a ~9% increase in having a satellite
+#Width now highly significant with a one centimeter increase in width corresponding to a ~9% increase in having a satellite
 
 #Add nominal scale color variables with dark color as the base group
 LPM3 <- lm(y~width + light + medium + mDark, data = crabs)
@@ -67,8 +71,8 @@ coeftest(LPM3, type = "HC1")
 logit1 <- glm(y~width + light + medium + mDark, family = binomial(link = "logit"), data = crabs)
 summary(logit1) #AIC = 197.46
 #obtain APEs
-summary(margins(logit2))
-#each one millimeter increase in width corresponds to an average marginal effect of ~8% increase in having satellites while light, medium, and dark colored crabs have a 20.5%, 18%, and 26% increase in probability of having satellites compared to dark crabs 
+summary(margins(logit1))
+#each one centimeter increase in width corresponds to an average marginal effect of ~8% increase in having satellites while light, medium, and dark colored crabs have a 20.5%, 18%, and 26% increase in probability of having satellites compared to dark crabs 
 
 #see if probit model has better fit to data
 probit1 <- glm(y~width + light + medium + mDark, family = binomial(link = "probit"), data = crabs)
@@ -107,7 +111,7 @@ pchisq(LR, df=3, lower.tail=FALSE)
 ```{r}
 logit3 <- glm(y ~ width + color, family = binomial(link = "logit"), data = crabs)
 summary(margins(logit3))
-#The average marginal effect of width remains nearly the same at about ~8% increase of satellite per one millimeter increase in width, and a one unit increase in darkness (ie: light to medium light or medium to dark) results in a ~9% decrease in probability of having satellites and is significant at the 5% level
+#The average marginal effect of width remains nearly the same at about ~8% increase of satellite per one centimeter increase in width, and a one unit increase in darkness (ie: light to medium light or medium to dark) results in a ~9% decrease in probability of having satellites and is significant at the 5% level
 
 #check significance 
 #unrestricted model is logit1: Pr[y=1| width, color]
@@ -130,6 +134,71 @@ BIC(logit3) #204.6
 
 #Ordinal variable with number of regressor penalty (BIC) shows better fit to data in addition to higher significance 
 ```
+
+#Confirm weight is still insignificant with color as an ordinal variable
+```{r}
+#unrestricted model is logit1: Pr[y=1| width, color, weight]
+#restricted model: Pr[y=1|width,color] (logit3)
+
+logit4 <- glm(y ~ width + color + weight, family = binomial(link = "logit"), data = crabs)
+URdeviance3 <- logit4$deviance
+Rdeviance2 <- logit3$deviance
+LR3 <- (Rdeviance2 - URdeviance3)
+#test with chi square under 1 degree of freedom
+pchisq(LR3, df=1, lower.tail=FALSE)
+#Weight still insignificant - certainly discard consideration at this point
+```
+
+#Explore poisson model for satelitte prediction
+```{r}
+pois_fit1 <- glm(sat ~ width + color, data = crabs, family ="poisson")
+summary(pois_fit1)
+#poisson model shows significance for both variables established in logit model with same direction
+
+#determine size of the average marginal effect of width and color
+poissonmfx(formula = sat ~ width + color, data = crabs, atmean = FALSE)
+#AME for every 1 cm increase in width results in an average of 0.433 satellites, and every unit increase of darkness results in an average decrease of number satellites by 0.49
+
+#Percentage change for satellite number when color may be more interpretable 
+coef_pois1 <- coef(pois_fit1)
+(exp(coef_pois1[3])-1)*100
+# ~15.6% decrease in number of satellites as the crab color darkens one step
+```
+
+#Poisson model corrections - quasipoisson and negative binomial
+```{r}
+#Estimate dispersion parameter
+pois1_resid <- crabs$sat - pois_fit1$fitted.values
+sigma <- sqrt(sum(pois1_resid^2/pois_fit1$fitted.values)/(nrow(crabs)-3))
+dispersion <- sigma^2
+dispersion #dispersion is 3.22 indicating overdispersion
+
+#correct standard errors for over dispersion with quasipossion model
+quasi_pois1 <- glm(sat ~ width + color, data = crabs, family = "quasipoisson")
+summary(quasi_pois1)
+#width remains significant while color no longer does
+
+#quasi poisson APE
+mean(crabs$sat)*coef(quasi_pois1)[2]
+#APE remains nearly the same under quasipossion model with a 1cm increase corresponding to 0.437 more  satellites on average
+
+#Estimate by negative binomial and pick best fit model
+negbin1 <- glm.nb(sat ~ width + color, data = crabs)
+summary(negbin1)
+
+#Find AME
+negbinmfx(formula = negbin1, data=crabs, atmean = FALSE, robust = TRUE)
+
+#One cm increase corresponds to an average of 0.53 more satellites 
+
+BIC(pois_fit1)
+BIC(negbin1) #negative binomial has better fit to data
+
+
+```
+
+
+
 
 
 
